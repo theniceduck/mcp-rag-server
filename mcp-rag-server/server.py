@@ -9,9 +9,12 @@ import uuid
 import shutil
 import json
 import asyncio
+import logging
+import sys
 from pathlib import Path
 from typing import Any, Sequence
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from mcp.server import Server
 from mcp.types import Tool, TextContent, ImageContent, EmbeddedResource
@@ -22,11 +25,23 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 
+# ---------- LOGGING ----------
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.StreamHandler(sys.stderr)  # MCP uses stdout for protocol, so log to stderr
+    ]
+)
+logger = logging.getLogger(__name__)
+# ----------------------------
+
 # ---------- CONFIG ----------
 CHROMA_DIR = os.getenv("CHROMA_DIR", "/data/chroma_db")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/data/uploads")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "embeddinggemma:300m")
-LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-r1:7b")
+LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-r1:1.5b")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://ollama:11434")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
@@ -41,8 +56,24 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # Set Ollama host
 os.environ["OLLAMA_HOST"] = OLLAMA_HOST
 
+# Log configuration
+logger.info("=" * 60)
+logger.info("MCP RAG Server - Starting")
+logger.info("=" * 60)
+logger.info(f"OLLAMA_HOST: {OLLAMA_HOST}")
+logger.info(f"EMBEDDING_MODEL: {EMBEDDING_MODEL}")
+logger.info(f"LLM_MODEL: {LLM_MODEL}")
+logger.info(f"CHUNK_SIZE: {CHUNK_SIZE}")
+logger.info(f"CHUNK_OVERLAP: {CHUNK_OVERLAP}")
+logger.info(f"TOP_K_DEFAULT: {TOP_K_DEFAULT}")
+logger.info(f"TEMPERATURE: {TEMPERATURE}")
+logger.info(f"CHROMA_DIR: {CHROMA_DIR}")
+logger.info(f"UPLOAD_DIR: {UPLOAD_DIR}")
+logger.info("=" * 60)
+
 # Initialize MCP server
 app = Server("rag-server")
+logger.info("MCP Server initialized")
 
 def _session_collection(session_id: str) -> str:
     """Generate collection name from session ID."""
@@ -100,6 +131,7 @@ ANSWER:"""
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available MCP tools."""
+    logger.info("Client requested tool list")
     return [
         Tool(
             name="upload_document",
@@ -188,33 +220,48 @@ async def list_tools() -> list[Tool]:
 @app.call_tool()
 async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
     """Handle tool calls."""
+    logger.info(f"Tool called: {name}")
+    logger.debug(f"Arguments: {arguments}")
     
     if name == "upload_document":
         file_path = arguments.get("file_path")
         custom_session_id = arguments.get("session_id")
         
+        logger.info(f"Upload request for: {file_path}")
+        
         if not file_path:
+            logger.error("No file_path provided")
             return [TextContent(type="text", text=json.dumps({"error": "file_path is required"}))]
         
         file_path = Path(file_path)
         if not file_path.exists():
+            logger.error(f"File not found: {file_path}")
             return [TextContent(type="text", text=json.dumps({"error": f"File not found: {file_path}"}))]
         
         if not str(file_path).lower().endswith(".pdf"):
+            logger.error(f"Invalid file type: {file_path}")
             return [TextContent(type="text", text=json.dumps({"error": "Only PDF files are supported"}))]
         
         # Generate or use custom session ID
         session_id = custom_session_id if custom_session_id else uuid.uuid4().hex[:12]
         saved_path = Path(UPLOAD_DIR) / f"{session_id}.pdf"
         
+        logger.info(f"Session ID: {session_id}")
+        logger.info(f"Copying file to: {saved_path}")
+        
         # Copy file to upload directory
         shutil.copy2(file_path, saved_path)
         
         # Load & chunk
+        logger.info("Loading PDF...")
         loader = PyPDFLoader(str(saved_path))
         docs = loader.load()
         if not docs:
+            logger.error("No content found in PDF")
             return [TextContent(type="text", text=json.dumps({"error": "No content found in the PDF"}))]
+        
+        logger.info(f"PDF loaded: {len(docs)} pages")
+        logger.info(f"Splitting into chunks (size={CHUNK_SIZE}, overlap={CHUNK_OVERLAP})...")
         
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE,
@@ -222,17 +269,25 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
         )
         chunks = splitter.split_documents(docs)
         if not chunks:
+            logger.error("No chunks produced from PDF")
             return [TextContent(type="text", text=json.dumps({"error": "Could not split the PDF into chunks"}))]
+        
+        logger.info(f"Created {len(chunks)} chunks")
+        logger.info(f"Generating embeddings using {EMBEDDING_MODEL}...")
         
         # Index
         emb = OllamaEmbeddings(model=EMBEDDING_MODEL)
         collection_name = _session_collection(session_id)
+        
+        logger.info(f"Indexing to ChromaDB collection: {collection_name}")
         _ = Chroma.from_documents(
             documents=chunks,
             embedding=emb,
             persist_directory=CHROMA_DIR,
             collection_name=collection_name,
         )
+        
+        logger.info(f"✅ Upload complete: {session_id} ({len(chunks)} chunks, {len(docs)} pages)")
         
         result = {
             "success": True,
@@ -249,41 +304,56 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
         top_k = arguments.get("top_k", TOP_K_DEFAULT)
         include_sources = arguments.get("include_sources", True)
         
+        logger.info(f"Query request - Session: {session_id}, Question: {question[:100]}...")
+        
         if not session_id:
+            logger.error("No session_id provided")
             return [TextContent(type="text", text=json.dumps({"error": "session_id is required"}))]
         
         if not question:
+            logger.error("No question provided")
             return [TextContent(type="text", text=json.dumps({"error": "question is required"}))]
         
         collection_name = _session_collection(session_id)
         
         # Ensure the collection exists
+        logger.info(f"Loading collection: {collection_name}")
         try:
             vectordb = _build_vectordb(collection_name)
         except Exception as e:
+            logger.error(f"Collection not found: {collection_name} - {e}")
             return [TextContent(type="text", text=json.dumps({
                 "error": f"Session not found: {session_id}. Upload a PDF first.",
                 "details": str(e)
             }))]
         
         # Retrieve
+        logger.info(f"Searching for top {top_k} relevant chunks...")
         retriever = vectordb.as_retriever(search_kwargs={"k": top_k})
         docs = retriever.get_relevant_documents(question)
+        
         if not docs:
+            logger.warning("No relevant documents found")
             return [TextContent(type="text", text=json.dumps({
                 "answer": "I couldn't find content related to that question in this PDF.",
                 "sources": []
             }))]
         
+        logger.info(f"Retrieved {len(docs)} chunks")
+        
         # Build stuffed prompt with explicit context
         context_text = _stuff_context(docs)
         prompt = _rag_prompt(context_text, question)
+        
+        logger.info(f"Generating answer using {LLM_MODEL}...")
         
         # Call the LLM
         llm = ChatOllama(model=LLM_MODEL, temperature=TEMPERATURE)
         result_msg = llm.invoke(prompt)
         raw = getattr(result_msg, "content", "") if result_msg else ""
         answer = _strip_think(raw)
+        
+        logger.info("Answer generated successfully")
         
         # Build result
         result = {"answer": answer}
@@ -303,6 +373,7 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
     
     elif name == "list_sessions":
+        logger.info("Listing all sessions")
         sessions = []
         upload_dir = Path(UPLOAD_DIR)
         
@@ -319,6 +390,7 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
                     "created_timestamp": created_time
                 })
         
+        logger.info(f"Found {len(sessions)} sessions")
         result = {
             "sessions": sessions,
             "count": len(sessions)
@@ -327,6 +399,7 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
     
     elif name == "delete_session":
         session_id = arguments.get("session_id")
+        logger.info(f"Delete request for session: {session_id}")
         
         if not session_id:
             return [TextContent(type="text", text=json.dumps({"error": "session_id is required"}))]
@@ -338,11 +411,13 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
         
         # Delete PDF file
         if pdf_path.exists():
+            logger.info(f"Deleting PDF file: {pdf_path}")
             pdf_path.unlink()
             deleted.append("pdf_file")
         
         # Delete Chroma collection
         try:
+            logger.info(f"Deleting ChromaDB collection: {collection_name}")
             emb = OllamaEmbeddings(model=EMBEDDING_MODEL)
             client = Chroma(
                 persist_directory=CHROMA_DIR,
@@ -351,15 +426,17 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
             client.delete_collection(collection_name)
             deleted.append("vector_index")
         except Exception as e:
-            pass
+            logger.warning(f"Could not delete collection: {e}")
         
         if deleted:
+            logger.info(f"✅ Session deleted: {session_id} ({', '.join(deleted)})")
             result = {
                 "success": True,
                 "session_id": session_id,
                 "deleted_components": deleted
             }
         else:
+            logger.warning(f"Session not found: {session_id}")
             result = {
                 "success": False,
                 "error": f"Session not found: {session_id}"
@@ -369,6 +446,7 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
     
     elif name == "get_session_info":
         session_id = arguments.get("session_id")
+        logger.info(f"Info request for session: {session_id}")
         
         if not session_id:
             return [TextContent(type="text", text=json.dumps({"error": "session_id is required"}))]
@@ -405,13 +483,25 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
 
 async def main():
     """Run the MCP server."""
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(
-            read_stream,
-            write_stream,
-            app.create_initialization_options()
-        )
+    logger.info("Starting MCP server with stdio transport...")
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            logger.info("Server ready - waiting for client connections")
+            await app.run(
+                read_stream,
+                write_stream,
+                app.create_initialization_options()
+            )
+    except Exception as e:
+        logger.error(f"Server error: {e}", exc_info=True)
+        raise
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)
 

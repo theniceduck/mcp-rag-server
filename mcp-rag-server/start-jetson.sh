@@ -45,7 +45,7 @@ echo "✅ Shared directory ready at ./shared/"
 # Start the container
 echo ""
 echo "🐳 Starting Docker container..."
-docker-compose up -d --build
+docker compose up -d --build
 
 # Wait for container to be ready
 echo ""
@@ -68,7 +68,7 @@ if docker ps | grep -q mcp-rag-server; then
     echo "   3. Start uploading documents!"
     echo ""
     echo "🛑 To stop:"
-    echo "   docker-compose down"
+    echo "   docker compose down"
 else
     echo "❌ Failed to start container"
     echo "   Check logs: docker logs mcp-rag-server"

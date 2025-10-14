@@ -25,18 +25,14 @@ chmod +x start-jetson.sh test-server.sh
 ./start-jetson.sh
 
 # Or start manually
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 2. Configure Cursor AI
 
 ```bash
-# Create config directory
-mkdir -p ~/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/
-
 # Copy configuration
-cp cursor-config-jetson.json \
-   ~/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
+cp mcp.json ~/.cursor/mcp.json
 ```
 
 ### 3. Restart Cursor AI
@@ -127,10 +123,13 @@ environment:
 ./start-jetson.sh
 
 # Stop server
-docker-compose down
+docker compose down
 
-# View logs
+# View logs (real-time)
 docker logs -f mcp-rag-server
+
+# View last 50 lines of logs
+docker logs --tail 50 mcp-rag-server
 
 # Restart server
 docker restart mcp-rag-server
@@ -143,6 +142,65 @@ sudo jtop
 
 # Check Ollama connection
 curl http://localhost:11434/api/tags
+```
+
+## Logging
+
+The server includes comprehensive logging that shows:
+
+- **Startup configuration** - All environment variables and settings
+- **Tool calls** - Which tools are being called and with what arguments
+- **File operations** - PDF uploads, file copies, deletions
+- **Processing steps** - PDF loading, chunking, embedding generation
+- **Query execution** - Vector search, LLM generation, results
+- **Errors and warnings** - Detailed error messages with context
+
+### View Logs
+
+```bash
+# Follow logs in real-time (Ctrl+C to stop)
+docker logs -f mcp-rag-server
+
+# View recent logs
+docker logs --tail 100 mcp-rag-server
+
+# Search logs for specific session
+docker logs mcp-rag-server 2>&1 | grep "session_id_here"
+
+# View only errors
+docker logs mcp-rag-server 2>&1 | grep ERROR
+```
+
+### Example Log Output
+
+```
+2025-01-15 10:23:45 [INFO] ============================================================
+2025-01-15 10:23:45 [INFO] MCP RAG Server - Starting
+2025-01-15 10:23:45 [INFO] ============================================================
+2025-01-15 10:23:45 [INFO] OLLAMA_HOST: http://localhost:11434
+2025-01-15 10:23:45 [INFO] EMBEDDING_MODEL: embeddinggemma:300m
+2025-01-15 10:23:45 [INFO] LLM_MODEL: deepseek-r1:1.5b
+2025-01-15 10:23:45 [INFO] CHUNK_SIZE: 500
+2025-01-15 10:23:45 [INFO] TOP_K_DEFAULT: 3
+2025-01-15 10:23:45 [INFO] Starting MCP server with stdio transport...
+2025-01-15 10:23:45 [INFO] Server ready - waiting for client connections
+2025-01-15 10:24:12 [INFO] Tool called: upload_document
+2025-01-15 10:24:12 [INFO] Upload request for: /shared/manual.pdf
+2025-01-15 10:24:12 [INFO] Session ID: abc123def456
+2025-01-15 10:24:12 [INFO] Loading PDF...
+2025-01-15 10:24:13 [INFO] PDF loaded: 45 pages
+2025-01-15 10:24:13 [INFO] Splitting into chunks (size=500, overlap=100)...
+2025-01-15 10:24:13 [INFO] Created 142 chunks
+2025-01-15 10:24:13 [INFO] Generating embeddings using embeddinggemma:300m...
+2025-01-15 10:24:25 [INFO] Indexing to ChromaDB collection: pdf_abc123def456
+2025-01-15 10:24:26 [INFO] ✅ Upload complete: abc123def456 (142 chunks, 45 pages)
+2025-01-15 10:25:03 [INFO] Tool called: query_document
+2025-01-15 10:25:03 [INFO] Query request - Session: abc123def456, Question: What are the main topics?
+2025-01-15 10:25:03 [INFO] Loading collection: pdf_abc123def456
+2025-01-15 10:25:03 [INFO] Searching for top 3 relevant chunks...
+2025-01-15 10:25:03 [INFO] Retrieved 3 chunks
+2025-01-15 10:25:03 [INFO] Generating answer using deepseek-r1:1.5b...
+2025-01-15 10:25:08 [INFO] Answer generated successfully
 ```
 
 ## Performance Optimization
@@ -167,7 +225,7 @@ environment:
 
 Then restart:
 ```bash
-docker-compose up -d --force-recreate
+docker compose up -d --force-recreate
 ```
 
 ## Troubleshooting
@@ -196,7 +254,7 @@ docker logs mcp-rag-server
 
 Rebuild:
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ### Out of Memory
@@ -257,7 +315,7 @@ If fails, verify Ollama is accessible from host network.
 ### On Host (Jetson)
 - Project: `~/mcp-rag-server/`
 - Shared PDFs: `~/mcp-rag-server/shared/`
-- Cursor config: `~/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
+- Cursor config: `~/.cursor/mcp.json`
 
 ### In Container
 - Uploaded PDFs: `/data/uploads/`
@@ -306,10 +364,10 @@ For production use, implement:
 
 ```bash
 # Stop and keep data
-docker-compose down
+docker compose down
 
 # Stop and remove all data
-docker-compose down -v
+docker compose down -v
 ```
 
 ## Credits
