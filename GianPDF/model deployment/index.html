@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>GianPDF</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #0a0a0a;
+      --muted: #666;
+      --accent: #0a0a0a; /* black UI */
+      --border: #ddd;
+      --radius: 16px;
+      --shadow: 0 10px 30px rgba(0,0,0,0.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, Arial;
+      line-height: 1.4;
+    }
+    .container { max-width: 1100px; margin: 40px auto; padding: 0 20px; }
+    .card {
+      background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .app-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .brand { font-weight: 800; letter-spacing: 0.4px; font-size: 22px; }
+    .badge { background: var(--accent); color: #fff; padding: 6px 10px; border-radius: 999px; font-size: 12px; }
+    .uploader {
+      padding: 18px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border);
+    }
+    .btn {
+      background: var(--accent); color: #fff; border: none; padding: 12px 16px;
+      border-radius: 12px; cursor: pointer; font-weight: 600;
+      transition: transform .05s ease, box-shadow .2s ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+    .file-name { color: var(--muted); font-size: 14px; }
+    .status { margin-left: auto; color: var(--muted); font-size: 13px; }
+
+    .chat { display: grid; grid-template-rows: 1fr auto; height: 70vh; }
+    .chat-history { padding: 22px; overflow-y: auto; }
+    .msg {
+      max-width: 78%; margin: 6px 0; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+    }
+    .user { margin-left: auto; background: #fff; }
+    .bot  { margin-right: auto; background: #0a0a0a; color: #fff; border-color: #0a0a0a; }
+    .sources { margin-top: 8px; font-size: 12px; opacity: .9; }
+    .chat-input { padding: 14px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
+    .chat-input input[type="text"] {
+      flex: 1; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; font-size: 15px; outline: none;
+    }
+    .footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 16px; }
+    .hint { padding: 16px; border-top: 1px dashed var(--border); color: var(--muted); font-size: 14px; }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .pill { padding: 8px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); }
+    /* Hide the actual file input */
+    #pdf-input { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="app-header">
+      <div class="brand">GianPDF</div>
+      <div class="row">
+        <span class="pill">White canvas</span>
+        <span class="pill">Black interface</span>
+        <span class="badge">RAG</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="uploader">
+        <button class="btn" id="upload-btn">Upload PDF</button>
+        <input id="pdf-input" type="file" accept="application/pdf" />
+        <span class="file-name" id="file-name">No file selected</span>
+        <span class="status" id="status">Waiting for a PDF…</span>
+      </div>
+
+      <div class="chat">
+        <div class="chat-history" id="history">
+          <div class="msg bot">
+            Hi! Upload a PDF to begin. Once indexed, ask me anything about it.
+            <div class="sources">Powered by Ollama + Chroma + LangChain</div>
+          </div>
+        </div>
+        <div class="chat-input">
+          <input id="question" type="text" placeholder="Ask something about your PDF…" disabled />
+          <button class="btn" id="ask-btn" disabled>Ask</button>
+        </div>
+        <div class="hint">Tip: try “Give me a concise summary of the main topic.”</div>
+      </div>
+    </div>
+
+    <div class="footer">© Your Company — Local RAG on Ollama</div>
+  </div>
+
+  <script>
+    const API = "http://127.0.0.1:8000";
+    const pdfInput = document.getElementById("pdf-input");
+    const fileName = document.getElementById("file-name");
+    const statusEl = document.getElementById("status");
+    const askBtn = document.getElementById("ask-btn");
+    const questionEl = document.getElementById("question");
+    const history = document.getElementById("history");
+    const uploadBtn = document.getElementById("upload-btn");
+
+    let sessionId = null;
+
+    function addMsg(text, who="bot", sources=[]) {
+      const wrap = document.createElement("div");
+      wrap.className = `msg ${who}`;
+      wrap.textContent = text;
+      if (sources && sources.length && who === "bot") {
+        const s = document.createElement("div");
+        s.className = "sources";
+        s.textContent = "Sources: " + sources.map((x,i)=>`[${i+1}] p.${x.page ?? "?"}`).join("  ");
+        wrap.appendChild(s);
+      }
+      history.appendChild(wrap);
+      history.scrollTop = history.scrollHeight;
+    }
+
+    // Open the file dialog exactly once
+    uploadBtn.addEventListener("click", () => {
+      pdfInput.click();
+    });
+
+    // Handle file selection + upload
+    pdfInput.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      fileName.textContent = file.name;
+      statusEl.textContent = "Uploading & indexing…";
+      askBtn.disabled = true;
+      questionEl.disabled = true;
+
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch(`${API}/upload`, { method: "POST", body: form });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        sessionId = data.session_id;
+        statusEl.textContent = `Ready. Indexed ${data.chunks_indexed} chunks.`;
+        addMsg("PDF indexed. Ask me anything about it.", "bot");
+        askBtn.disabled = false;
+        questionEl.disabled = false;
+        questionEl.focus();
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Upload failed.";
+        addMsg("Upload/index failed. Please try again.", "bot");
+      }
+    });
+
+    // Ask question
+    askBtn.addEventListener("click", async () => {
+      const q = questionEl.value.trim();
+      if (!q || !sessionId) return;
+      addMsg(q, "user");
+      questionEl.value = "";
+      askBtn.disabled = true;
+
+      try {
+        const res = await fetch(`${API}/ask`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q, session_id: sessionId })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        addMsg(data.answer || "(no answer)", "bot", data.sources || []);
+      } catch (err) {
+        console.error(err);
+        addMsg("Request failed. Is the backend running on :8000?", "bot");
+      } finally {
+        askBtn.disabled = false;
+        questionEl.focus();
+      }
+    });
+
+    // Enter to ask
+    questionEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !askBtn.disabled) askBtn.click();
+    });
+  </script>
+</body>
+</html>

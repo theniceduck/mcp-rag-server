@@ -1,0 +1,8 @@
+pip install -U fastapi uvicorn langchain langchain-community langchain-chroma langchain-ollama chromadb pypdf tiktoken
+ollama pull embeddinggemma:300m
+ollama pull deepseek-r1:7b
+
+
+
+#uvicorn server:app --reload --port 8000
+

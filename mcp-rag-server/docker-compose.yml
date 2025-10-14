@@ -1,0 +1,26 @@
+services:
+  mcp-rag-server:
+    build: .
+    container_name: mcp-rag-server
+    volumes:
+      - mcp_data:/data
+      - ./shared:/shared  # Mount shared directory for PDF uploads
+    environment:
+      - OLLAMA_HOST=http://localhost:11434  # Use host's Ollama via host network
+      - EMBEDDING_MODEL=embeddinggemma:300m
+      - LLM_MODEL=deepseek-r1:1.5b  # Smaller model optimized for Jetson
+      - CHROMA_DIR=/data/chroma_db
+      - UPLOAD_DIR=/data/uploads
+      - CHUNK_SIZE=500  # Reduced for smaller model
+      - CHUNK_OVERLAP=100
+      - TOP_K_DEFAULT=3  # Fewer chunks for smaller context
+      - TEMPERATURE=0.1
+      - MAX_CONTEXT_CHARS=4000  # Reduced for 1.5b model
+    network_mode: "host"  # Direct access to host's Ollama on Linux
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  mcp_data:
+
