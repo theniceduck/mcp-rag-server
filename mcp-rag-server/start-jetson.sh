@@ -62,6 +62,16 @@ if docker ps | grep -q mcp-rag-server; then
     echo "📝 View logs with:"
     echo "   docker logs -f mcp-rag-server"
     echo ""
+    
+    # Auto-open logs in new terminal tab
+    if command -v gnome-terminal &> /dev/null; then
+        echo "🪟 Opening logs in new terminal tab..."
+        gnome-terminal --tab -- bash -c "docker logs -f mcp-rag-server; exec bash" &
+        sleep 1
+        echo "✅ Logs tab opened"
+    fi
+    
+    echo ""
     echo "🎯 Next steps:"
     echo "   1. Copy PDFs to ./shared/ directory"
     echo "   2. Configure Cursor AI (see README.md)"
