@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "rag-serverless": {
+      "command": "python",
+      "args": [
+        "launcher.py"
+      ],
+      "cwd": "C:/Users/User/Documents/Projects/model_context_protocol/mcp-serverless",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
+
+// Instructions:
+// 1. Copy this file's content
+// 2. Update "cwd" path to match your project location
+// 3. Add to Cursor's MCP settings file:
+//    Windows: %APPDATA%\Cursor\User\globalStorage\rooveterinaryinc.roo-cline\settings\mcp_settings.json
+//    Linux: ~/.config/Cursor/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json
+//    Mac: ~/Library/Application Support/Cursor/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json
+// 4. Restart Cursor
+// 5. The launcher will start automatically when you use RAG tools in Claude/Cursor
+

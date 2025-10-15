@@ -1,0 +1,28 @@
+services:
+  mcp-rag-serverless:
+    image: mcp-rag-server:latest
+    build:
+      context: ../mcp-rag-server
+      dockerfile: Dockerfile
+    container_name: mcp-rag-serverless
+    volumes:
+      # Reuse existing GianPDF chroma_db
+      - ../GianPDF/chroma_db:/data/chroma_db
+      # Local upload directory
+      - ./uploads:/data/uploads
+    environment:
+      - OLLAMA_HOST=http://localhost:11434
+      - EMBEDDING_MODEL=embeddinggemma:300m
+      - LLM_MODEL=deepseek-r1:1.5b
+      - CHROMA_DIR=/data/chroma_db
+      - UPLOAD_DIR=/data/uploads
+      - CHUNK_SIZE=500
+      - CHUNK_OVERLAP=100
+      - TOP_K_DEFAULT=3
+      - TEMPERATURE=0.1
+      - MAX_CONTEXT_CHARS=4000
+    network_mode: "host"
+    stdin_open: true
+    tty: false
+    restart: "no"  # Don't auto-restart (launcher controls lifecycle)
+

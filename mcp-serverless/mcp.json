@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "rag-serverless": {
+      "command": "python",
+      "args": [
+        "launcher.py"
+      ],
+      "cwd": "${workspaceFolder}/mcp-serverless"
+    }
+  }
+}
+

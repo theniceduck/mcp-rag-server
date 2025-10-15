@@ -1,0 +1,3 @@
+# MCP Serverless Launcher Dependencies
+docker>=7.0.0
+
